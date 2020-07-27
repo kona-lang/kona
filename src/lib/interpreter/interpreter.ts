@@ -6,14 +6,12 @@ import { Token } from '../lexer/Token';
 import { throws } from '../internal/error/throws';
 import { TypeError } from '../internal/error/errorTypes/runtime/TypeError';
 import { KonaError } from '../internal/error/errorTypes/InternalKonaError';
-import * as chalkImport from 'chalk';
+import chalk from 'chalk';
 import { StmtVisitors } from '../statements/StmtVisitors';
 import * as Stmt from '../statements/stmt';
 import { Statement } from '../statements/Statements';
 import { Environment } from './Environment';
 import { ReferenceError } from '../internal/error/errorTypes/runtime/ReferenceError';
-
-const chalk = chalkImport.default;
 
 class Interpreter implements ExpVisitors, StmtVisitors {
 	private env = new Environment(this.fileName, null);
@@ -44,7 +42,9 @@ class Interpreter implements ExpVisitors, StmtVisitors {
 
 	public visitPrintStmt(statement: Stmt.PrintStmt): void {
 		const val: any = this.evaluate(statement.expression);
-		console.log(this.stringify(val));
+		const unescapeJs = require('unescape-js');
+
+		console.log(unescapeJs(this.stringify(val)));
 	}
 
 	public visitVariableStmt(statement: Stmt.VariableStmt): void {
@@ -96,14 +96,6 @@ class Interpreter implements ExpVisitors, StmtVisitors {
 	}
 
 	public visitVar(expression: Expr.Variable): any {
-		if (expression.name.lexeme === '_' && !this.env.getPragma('allow_underscore_for_var_names')) {
-			this.throwError(
-				new ReferenceError(`Undefined variable '_', variables that are named '_' are not assigned.`),
-				expression.name,
-				"To use '_' as a valid variable name, put 'pragma allow_underscore_for_var_names' at the top of your file.\nTo learn more about pragmas, visit: https://github.com/kona-lang/kona/wiki/Pragmas"
-			);
-		}
-
 		return this.env.getVar(expression.name);
 	}
 
@@ -144,7 +136,6 @@ class Interpreter implements ExpVisitors, StmtVisitors {
 				return left / right;
 			case TokenType.PLUS:
 				// those ifs are here to prevent js type conversion
-
 				if (typeof left === 'number' && typeof right === 'number') {
 					return left + right;
 				}
@@ -249,12 +240,14 @@ class Interpreter implements ExpVisitors, StmtVisitors {
 	}
 
 	private throwTypeError(operator: Token, expected: string, got: string) {
+		const isNil = got == undefined ? 'nil' : got;
+
 		throws(
 			new TypeError(
 				"Expected operand of type '" +
 					expected +
 					"', but got '" +
-					(got == undefined ? 'nil' : got) +
+					isNil +
 					"' on operator '" +
 					operator.lexeme +
 					"'."
@@ -262,8 +255,12 @@ class Interpreter implements ExpVisitors, StmtVisitors {
 			this.fileName,
 			{
 				line: operator.line,
-				column: operator.line ? operator.line : 0,
-				hint: 'TO_BE_REPLACED',
+				column: (operator.column || 1) - operator.lexeme.length,
+				endColumn: operator.column || 1,
+				hint:
+					isNil == 'nil'
+						? "If you don't want strict operations,\nyou could use 'pragma loose;'. This is not recommended, as it can lead\nto unexpected results.\nTo learn more about pragmas, visit: https://github.com/kona-lang/kona/wiki/Pragmas."
+						: undefined,
 				exit: true
 			}
 		);
@@ -273,6 +270,7 @@ class Interpreter implements ExpVisitors, StmtVisitors {
 		throws(Error, this.fileName, {
 			line: token.line,
 			column: token.column ? token.column : 0,
+			endColumn: (token.column || 0) + token.lexeme.length,
 			hint,
 			exit: true
 		});
